@@ -1,0 +1,1488 @@
+name: Compilar APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+      - name: Crear proyecto
+        run: |
+          set -e
+          mkdir -p proyecto && cd proyecto
+          mkdir -p $(dirname app/build.gradle.kts)
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.example.perrita"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.example.perrita"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+          }
+          EOF
+          mkdir -p $(dirname app/src/main/AndroidManifest.xml)
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application android:label="Mi Perrita" android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+          mkdir -p $(dirname app/src/main/assets/atlas.txt)
+          cat > app/src/main/assets/atlas.txt <<'EOF'
+          negra_a|sit:0:0:56:80;w0:57:44:37:36;w1:95:46:32:34;w2:128:43:35:37;w3:164:43:34:37;pb:199:32:50:48
+          collie_a|sit:0:0:64:80;w0:65:46:35:34;w1:101:49:34:31;w2:136:46:35:34;w3:172:46:34:34;pb:207:33:50:47
+          dalmata_a|sit:0:0:60:80;w0:61:47:36:33;w1:98:49:34:31;w2:133:47:36:33;w3:170:47:34:33;pb:205:35:49:45
+          husky_a|sit:0:0:56:80;w0:57:48:34:32;w1:92:50:32:30;w2:125:48:34:32;w3:160:48:32:32;pb:193:35:46:45
+          samoyedo_a|sit:0:0:55:80;w0:56:48:32:32;w1:89:50:31:30;w2:121:48:31:32;pb:153:35:44:45
+          doberman_a|sit:0:0:35:80;w0:36:52:28:28;w1:65:52:28:28;w2:94:52:28:28;pb:123:35:35:45
+          caniche_a|sit:0:0:39:80;w0:40:49:29:31;w1:70:49:29:31;w2:100:49:29:31;pb:130:33:40:47
+          caniche_p|sit:0:0:36:64;w0:37:39:24:25;w1:62:39:24:25;w2:87:39:24:25;pb:112:25:33:39
+          samoyedo_p|sit:0:0:47:64;w0:48:38:27:26;w1:76:40:26:24;w2:103:38:26:26;pb:130:28:37:36
+          husky_p|sit:0:0:45:64;w0:46:38:27:26;w1:74:40:26:24;w2:101:38:27:26;w3:129:38:26:26;pb:156:28:37:36
+          dalmata_p|sit:0:0:49:64;w0:50:38:29:26;w1:80:40:27:24;w2:108:38:29:26;w3:138:38:28:26;pb:167:28:39:36
+          collie_p|sit:0:0:53:64;w0:54:35:29:29;w1:84:38:28:26;w2:113:35:29:29;w3:143:36:28:28;pb:172:26:41:38
+          doberman_p|sit:0:0:46:64;w0:47:35:29:29;w1:77:37:28:27;w2:106:36:28:28;pb:135:25:37:39
+          negra_p|sit:0:0:48:64;w0:49:34:30:30;w1:80:36:27:28;w2:108:34:29:30;w3:138:34:28:30;pb:167:24:40:40
+          EOF
+          mkdir -p $(dirname app/src/main/java/com/example/perrita/Atlas.kt)
+          cat > app/src/main/java/com/example/perrita/Atlas.kt <<'EOF'
+          package com.example.perrita
+          import android.content.Context
+          import android.graphics.Bitmap
+          import android.graphics.BitmapFactory
+          object Atlas {
+              private val m = HashMap<String, Bitmap>()
+              private val nw = HashMap<String, Int>()
+              fun load(c: Context) {
+                  if (m.isNotEmpty()) return
+                  c.assets.open("atlas.txt").bufferedReader().readLines().forEach { ln ->
+                      val parts = ln.split("|"); val key = parts[0]
+                      val at = BitmapFactory.decodeStream(c.assets.open("$key.png"))
+                      var n = 0
+                      parts[1].split(";").forEach { e ->
+                          val q = e.split(":")
+                          m["$key/${q[0]}"] = Bitmap.createBitmap(at, q[1].toInt(), q[2].toInt(), q[3].toInt(), q[4].toInt())
+                          if (q[0][0] == 'w') n++
+                      }
+                      nw[key] = max(1, n)
+                  }
+              }
+              private fun max(a: Int, b: Int) = if (a > b) a else b
+              fun get(key: String, nm: String) = m["$key/$nm"]
+              fun walks(key: String) = nw[key] ?: 1
+          }
+          EOF
+          mkdir -p $(dirname app/src/main/java/com/example/perrita/D.kt)
+          cat > app/src/main/java/com/example/perrita/D.kt <<'EOF'
+          package com.example.perrita
+          import android.graphics.*
+          import kotlin.math.*
+          class Breed(val id: String, val name: String, val big: Float)
+          class Pers(val t: String, val soc: Float, val ene: Float, val bra: Float, val dom: Float, val ter: Float)
+          class Cx(val title: String, val tb: String, val a: List<String>, val b: List<String>)
+          object D {
+              val breeds = listOf(Breed("negra", "Negrita", 0.4f), Breed("collie", "Border Collie", 0.6f), Breed("dalmata", "Dálmata", 0.7f),
+                  Breed("husky", "Husky", 0.7f), Breed("samoyedo", "Samoyedo", 0.6f), Breed("doberman", "Doberman", 1f), Breed("caniche", "Caniche", 0.3f))
+              val pers = listOf(Pers("Cariñosa", 0.8f, 0.5f, 0.3f, 0.2f, 0.9f), Pers("Líder lista", 0.6f, 0.8f, 0.7f, 0.8f, 0.4f),
+                  Pers("Traviesa", 0.9f, 0.95f, 0.6f, 0.5f, 0.3f), Pers("Aventurera dramática", 0.6f, 0.9f, 0.8f, 0.6f, 0.4f),
+                  Pers("Dulce y abrazable", 0.95f, 0.6f, 0.4f, 0.1f, 1f), Pers("Valiente y seria", 0.3f, 0.6f, 1f, 0.9f, 0.3f),
+                  Pers("Presumida elegante", 0.5f, 0.5f, 0.3f, 0.6f, 0.5f))
+              val intE = listOf("🎾", "🏃", "👃", "🥰", "😤", "😨", "😒")
+              val intN = listOf("quiere jugar", "persigue", "olfatea", "quiere acurrucarse", "reta", "huye", "ignora")
+              val fBase = listOf("Croquetas", "Pollo", "Carne", "Pescado", "Huevo", "Arroz", "Zanahoria", "Manzana", "Plátano", "Queso", "Galleta", "Hueso", "Salchicha", "Pavo", "Avena", "Calabaza", "Arándanos", "Sandía", "Yogur", "Helado canino")
+              val fPrep = listOf("al vapor", "a la plancha", "hervido", "en cubitos", "triturado", "con caldo", "con arroz", "con huevo", "con verduras", "en sopa", "crujiente", "con miel", "congelado", "en puré", "con queso", "gourmet")
+              val fx = listOf("❤️", "⭐", "💦", "🎵", "💤", "✨", "🫧", "💢", "❓", "❗", "🍖", "🦴", "🎾", "🌸", "💫", "☁️", "🔥", "🌈", "👏", "🎉")
+              val cats = listOf(
+                  Cx("🤚 Caricias", "¿Cómo?", listOf("la cabeza", "las orejas", "la barriga", "el lomo", "las patitas", "el hocico", "la colita", "las mejillas", "el cuello", "el pecho", "la espalda", "los bigotes").map { "Acariciar $it" }, listOf("suavemente", "rápido", "con cosquillas", "con masaje")),
+                  Cx("🎾 Jugar", "¿Cómo?", listOf("la pelota", "el hueso", "el frisbee", "la cuerda", "el peluche", "la pelota chillona", "el aro", "la cometa", "las burbujas", "el espejo", "el tambor", "el cohete", "el cono", "las cajas", "el silbato").map { "Jugar con $it" }, listOf("lanzar", "esconder", "jalar", "perseguir", "bailar")),
+                  Cx("🎓 Trucos", "Nivel", listOf("Sentarse", "Dar la pata", "Rodar", "Hacerse el muerto", "Saltar", "Bailar", "Girar", "Saludar", "Hablar", "Caminar en dos patas", "Dar vueltas", "Dar un besito", "Ladrar", "Aullar", "Gatear", "Inclinarse", "Esconderse", "Reverencia", "Parada de manos", "Saltar el aro"), listOf("fácil", "medio", "de show")),
+                  Cx("🛁 Baño", "Tipo", listOf("Mojar", "Enjabonar", "Champú", "Masaje de espuma", "Enjuagar", "Secar con toalla", "Secador", "Cepillar", "Perfume", "Lazo final"), listOf("normal", "extra")),
+                  Cx("😴 Cuidados", "", listOf("Llevar a la cama", "Cuna acolchada", "Arrullo", "Nana", "Cobijita", "Luz tenue", "Peluche", "Buenas noches"), listOf("")),
+                  Cx("🌳 Paseos", "", listOf("Parque", "Playa", "Bosque", "Ciudad", "Nieve", "Montaña", "Río", "Jardín", "Campo", "Heladería").map { "Paseo: $it" }, listOf("")))
+              val slots = listOf("🎩 Sombrero", "👕 Camisa", "🕶️ Lentes", "🎀 Cuello", "🦸 Espalda", "👢 Pies", "🌸 Orejas")
+              val nShapes = intArrayOf(24, 18, 8, 8, 6, 4, 4)
+              val colors = listOf("rojo" to 0xFFE53935.toInt(), "azul" to 0xFF1E88E5.toInt(), "amarillo" to 0xFFFDD835.toInt(), "verde" to 0xFF43A047.toInt(), "rosa" to 0xFFF48FB1.toInt(), "morado" to 0xFF8E24AA.toInt(), "naranja" to 0xFFFB8C00.toInt())
+              val total = nShapes.sum() * 7
+              fun shapeName(sl: Int, s: Int): String = when (sl) {
+                  0 -> (if ((s / 3) % 2 == 1) "Sombrero " else "Gorro ") + listOf("bajo", "medio", "alto")[s % 3] + listOf("", " con pompón", " con pluma", " con flor")[(s / 6) % 4]
+                  1 -> "Camisa " + listOf("lisa", "a rayas", "de lunares", "a cuadros", "de aros", "de estrellas")[s % 6] + listOf(" redonda", " cuello V", " con cuello")[(s / 6) % 3]
+                  2 -> "Lentes " + listOf("redondos", "cuadrados", "de corazón", "de estrella", "visor", "monóculo", "de sol", "3D")[s]
+                  3 -> listOf("Moño", "Bufanda", "Pañuelo", "Collar con campana", "Corbata", "Collar de perlas", "Babero", "Collar de flores")[s]
+                  4 -> listOf("Capa corta", "Capa larga", "Alas", "Mochila", "Alas de hada", "Tutú")[s]
+                  5 -> listOf("Botas", "Calcetines", "Zapatos", "Patines")[s]
+                  else -> listOf("Moño de oreja", "Flor de oreja", "Diadema", "Pasador")[s]
+              }
+              fun dk(c: Int) = ((c shr 1) and 0x7F7F7F) or (0xFF shl 24)
+              fun motion(m: Int, p: Float): FloatArray {
+                  val pi = PI.toFloat(); val t = 2 * pi * p; val r = floatArrayOf(0f, 0f, 0f, 1f, 1f)
+                  when (m % 22) {
+                      0 -> r[1] = -abs(sin(pi * p)) * 0.5f
+                      1 -> r[1] = -abs(sin(t)) * 0.4f
+                      2 -> r[2] = 360f * p
+                      3 -> { r[2] = 360f * p; r[1] = -sin(pi * p) * 0.3f }
+                      4 -> { r[4] = 1 + 0.15f * sin(4 * t); r[3] = 1 - 0.1f * sin(4 * t) }
+                      5 -> r[0] = 0.03f * sin(20 * t)
+                      6 -> r[2] = 10f * sin(2 * t)
+                      7 -> r[4] = 1 + 0.2f * sin(pi * p)
+                      8 -> { r[4] = 1 - 0.2f * sin(pi * p); r[3] = 1 + 0.1f * sin(pi * p) }
+                      9 -> r[2] = 15f * sin(t)
+                      10 -> r[0] = 0.25f * sin(t)
+                      11 -> { r[0] = 0.2f * sin(t); r[1] = -0.1f * (1 - cos(t)) }
+                      12 -> r[0] = 0.25f * sin(t) * cos(6 * t)
+                      13 -> r[0] = -0.2f * sin(pi * p)
+                      14 -> r[0] = 0.2f * sin(pi * p)
+                      15 -> r[4] = 1 + 0.04f * sin(3 * t)
+                      16 -> { r[2] = 720f * p; r[0] = 0.4f * (p - 0.5f) }
+                      17 -> r[2] = -20f * sin(pi * p)
+                      18 -> { r[0] = 0.1f * sin(4 * t); r[2] = 8f * sin(4 * t) }
+                      19 -> { r[3] = 1 + 0.1f * sin(5 * t); r[4] = r[3] }
+                      20 -> r[1] = -0.5f * (1 - p) * (1 - p)
+                      else -> r[2] = 6f * sin(6 * t)
+                  }
+                  return r
+              }
+              fun wear(c: Canvas, p: Paint, o: IntArray, side: Boolean, x0: Float, y0: Float, w: Float, h: Float, pass: Int) {
+                  val hx = x0 + (if (side) 0.8f else 0.5f) * w; val hTop = y0 + 0.04f * h; val hW = (if (side) 0.3f else 0.44f) * w
+                  val nx = x0 + (if (side) 0.68f else 0.5f) * w; val nY = y0 + (if (side) 0.3f else 0.36f) * h
+                  val tl = x0 + (if (side) 0.25f else 0.3f) * w; val tt = y0 + (if (side) 0.34f else 0.4f) * h
+                  val tr = x0 + (if (side) 0.65f else 0.7f) * w; val tb = y0 + (if (side) 0.66f else 0.78f) * h
+                  val fy = y0 + (if (side) 0.95f else 0.97f) * h; val f1 = x0 + (if (side) 0.3f else 0.38f) * w; val f2 = x0 + (if (side) 0.62f else 0.62f) * w
+                  val d = hW / 10f
+                  fun r(l: Float, t: Float, rr: Float, b: Float, col: Int) { p.style = Paint.Style.FILL; p.color = col; c.drawRect(l, t, rr, b, p) }
+                  fun o2(x: Float, y: Float, rad: Float, col: Int) { p.style = Paint.Style.FILL; p.color = col; c.drawCircle(x, y, rad, p) }
+                  fun ring(x: Float, y: Float, rad: Float, col: Int) { p.style = Paint.Style.STROKE; p.strokeWidth = max(2f, d * 0.5f); p.color = col; c.drawCircle(x, y, rad, p); p.style = Paint.Style.FILL }
+                  fun it(sl: Int): Int = o[sl]
+                  if (pass == 0) {
+                      if (it(4) >= 0) { val s = it(4) / 7; val col = D.colors[it(4) % 7].second; val q = (tr - tl) * 0.15f
+                          when (s) { 0 -> r(tl - q, tt - d, tr + q, tb, col); 1 -> r(tl - q, tt - d, tr + q, fy, col)
+                              2 -> { o2(tl - d, tt + d, d * 2.5f, Color.WHITE); o2(tr + d, tt + d, d * 2.5f, Color.WHITE) }
+                              3 -> r(tl - d * 2, tt, tl + d, tb - d * 2, col)
+                              4 -> { o2(tl - d, tt, d * 2.5f, col); o2(tr + d, tt, d * 2.5f, col) }
+                              else -> r(tl - d * 2, tb - d * 1.5f, tr + d * 2, tb, col) } }
+                      return
+                  }
+                  if (it(5) >= 0) { val s = it(5) / 7; val col = D.colors[it(5) % 7].second
+                      for (fx in floatArrayOf(f1, f2)) when (s) { 0 -> r(fx - d * 1.2f, fy - d * 2.5f, fx + d * 1.2f, fy, col); 1 -> r(fx - d * 1.2f, fy - d * 1.5f, fx + d * 1.2f, fy, col)
+                          2 -> r(fx - d * 1.4f, fy - d * 0.9f, fx + d * 1.4f, fy, col); else -> { r(fx - d * 1.4f, fy - d * 0.9f, fx + d * 1.4f, fy, col); r(fx - d * 1.4f, fy, fx + d * 1.4f, fy + d * 0.3f, Color.GRAY) } } }
+                  if (it(1) >= 0) { val s = it(1) / 7; val col = D.colors[it(1) % 7].second; val wd = tr - tl; val ht = tb - tt
+                      r(tl, tt, tr, tb, col)
+                      when (s % 6) {
+                          1 -> for (i in 0..3) r(tl, tt + ht * (2 * i + 1) / 8f, tr, tt + ht * (2 * i + 2) / 8f, dk(col))
+                          2 -> for (i in 0..2) for (j in 0..2) o2(tl + wd * (i + 0.5f) / 3f, tt + ht * (j + 0.5f) / 3f, wd / 14f, Color.WHITE)
+                          3 -> for (i in 1..3) { r(tl + wd * i / 4f - 1, tt, tl + wd * i / 4f + 1, tb, dk(col)); r(tl, tt + ht * i / 4f - 1, tr, tt + ht * i / 4f + 1, dk(col)) }
+                          4 -> for (i in 0..2) r(tl, tt + ht * (2 * i + 1) / 6f, tr, tt + ht * (2 * i + 2) / 6f, Color.WHITE)
+                          5 -> for (i in 0..2) for (j in 0..2) o2(tl + wd * (i + 0.5f) / 3f, tt + ht * (j + 0.5f) / 3f, wd / 22f, 0xFFFFEB3B.toInt())
+                      }
+                      when ((s / 6) % 3) { 1 -> r(nx - wd * 0.12f, tt, nx + wd * 0.12f, tt + ht * 0.2f, Color.WHITE); 2 -> { r(tl, tt, tl + wd * 0.25f, tt + ht * 0.15f, Color.WHITE); r(tr - wd * 0.25f, tt, tr, tt + ht * 0.15f, Color.WHITE) } } }
+                  if (it(3) >= 0) { val s = it(3) / 7; val col = D.colors[it(3) % 7].second
+                      when (s) { 0 -> { r(nx - d * 2.2f, nY - d * 0.8f, nx - d * 0.3f, nY + d * 0.8f, col); r(nx + d * 0.3f, nY - d * 0.8f, nx + d * 2.2f, nY + d * 0.8f, col); o2(nx, nY, d * 0.5f, dk(col)) }
+                          1 -> { r(nx - d * 3.5f, nY - d * 0.6f, nx + d * 3.5f, nY + d * 0.8f, col); r(nx + d * 1.5f, nY, nx + d * 2.7f, nY + d * 3, col) }
+                          2 -> { p.color = col; p.style = Paint.Style.FILL; c.drawPath(Path().apply { moveTo(nx - d * 3.5f, nY - d * 0.5f); lineTo(nx + d * 3.5f, nY - d * 0.5f); lineTo(nx, nY + d * 3); close() }, p) }
+                          3 -> { r(nx - d * 3.5f, nY - d * 0.5f, nx + d * 3.5f, nY + d * 0.5f, col); o2(nx, nY + d * 0.8f, d * 0.8f, 0xFFFFD54F.toInt()) }
+                          4 -> { r(nx - d * 0.5f, nY, nx + d * 0.5f, nY + d * 3, col); o2(nx, nY, d * 0.7f, dk(col)) }
+                          5 -> for (i in -3..3) o2(nx + i * d, nY + abs(i) * d * 0.15f, d * 0.45f, Color.WHITE)
+                          6 -> { r(nx - d * 2.5f, nY, nx + d * 2.5f, nY + d * 3.5f, Color.WHITE); r(nx - d * 2.5f, nY + d * 3f, nx + d * 2.5f, nY + d * 3.5f, col) }
+                          else -> for (i in -3..3 step 2) { o2(nx + i * d, nY, d * 0.6f, col); o2(nx + i * d, nY, d * 0.25f, 0xFFFFEB3B.toInt()) } } }
+                  if (it(6) >= 0) { val s = it(6) / 7; val col = D.colors[it(6) % 7].second; val ey = hTop + hW * 0.35f
+                      val xs = if (side) floatArrayOf(hx - hW * 0.2f) else floatArrayOf(hx - hW * 0.5f, hx + hW * 0.5f)
+                      for (x in xs) when (s) { 0 -> { o2(x - d, ey, d, col); o2(x + d, ey, d, col); o2(x, ey, d * 0.5f, dk(col)) }
+                          1 -> { for (k in 0..4) o2(x + cos(k * 1.2566f) * d * 1.1f, ey + sin(k * 1.2566f) * d * 1.1f, d * 0.7f, col); o2(x, ey, d * 0.6f, 0xFFFFEB3B.toInt()) }
+                          2 -> {}
+                          else -> r(x - d * 0.6f, ey - d * 0.4f, x + d * 0.6f, ey + d * 0.4f, col) }
+                      if (s == 2) r(hx - hW * 0.45f, hTop + d * 0.5f, hx + hW * 0.45f, hTop + d * 1.4f, col) }
+                  if (it(2) >= 0) { val s = it(2) / 7; val col = D.colors[it(2) % 7].second; val ey = hTop + hW * 0.52f; val rad = hW * 0.14f
+                      val a = if (side) hx else hx - hW * 0.22f; val b = if (side) hx + hW * 0.3f else hx + hW * 0.22f
+                      when (s) { 0 -> { ring(a, ey, rad, col); ring(b, ey, rad, col) }
+                          1 -> { for (x in floatArrayOf(a, b)) { p.style = Paint.Style.STROKE; p.strokeWidth = max(2f, d * 0.5f); p.color = col; c.drawRect(x - rad, ey - rad, x + rad, ey + rad, p); p.style = Paint.Style.FILL } }
+                          2 -> { for (x in floatArrayOf(a, b)) { o2(x - rad * 0.4f, ey - rad * 0.2f, rad * 0.6f, 0xFFFF4081.toInt()); o2(x + rad * 0.4f, ey - rad * 0.2f, rad * 0.6f, 0xFFFF4081.toInt()); o2(x, ey + rad * 0.3f, rad * 0.6f, 0xFFFF4081.toInt()) } }
+                          3 -> { for (x in floatArrayOf(a, b)) { o2(x, ey, rad, 0xFFFFD600.toInt()); o2(x, ey, rad * 0.4f, col) } }
+                          4 -> r(a - rad, ey - rad * 0.6f, b + rad, ey + rad * 0.6f, col)
+                          5 -> { ring(b, ey, rad, col); r(b + rad, ey, b + rad + d, ey + d * 3, col) }
+                          6 -> { o2(a, ey, rad, Color.BLACK); o2(b, ey, rad, Color.BLACK); ring(a, ey, rad, col); ring(b, ey, rad, col) }
+                          else -> { o2(a, ey, rad, 0xFFE53935.toInt()); o2(b, ey, rad, 0xFF1E88E5.toInt()) } } }
+                  if (it(0) >= 0) { val s = it(0) / 7; val col = D.colors[it(0) % 7].second
+                      val y = hTop + d * 1.5f; val ch = d * (2 + 2 * (s % 3)); val cw = d * 7
+                      r(hx - cw / 2, y - ch, hx + cw / 2, y, col); r(hx - cw / 2, y - d, hx + cw / 2, y, dk(col))
+                      if ((s / 3) % 2 == 1) r(hx - d * 5.5f, y - d * 0.4f, hx + d * 5.5f, y + d * 0.5f, col)
+                      when ((s / 6) % 4) { 1 -> o2(hx, y - ch - d * 0.8f, d, Color.WHITE); 2 -> r(hx + d * 2, y - ch - d * 3, hx + d * 3, y - ch, 0xFFFF8A65.toInt())
+                          3 -> { o2(hx + d * 2, y - ch, d * 1.3f, 0xFFFF80AB.toInt()); o2(hx + d * 2, y - ch, d * 0.5f, 0xFFFFEB3B.toInt()) } } }
+              }
+          }
+          EOF
+          mkdir -p $(dirname app/src/main/java/com/example/perrita/GameView.kt)
+          cat > app/src/main/java/com/example/perrita/GameView.kt <<'EOF'
+          package com.example.perrita
+          import android.content.Context
+          import android.content.SharedPreferences
+          import android.graphics.*
+          import android.os.SystemClock
+          import android.view.MotionEvent
+          import android.view.View
+          import kotlin.math.*
+
+          class Pt(var e: String, var x: Float, var y: Float, var vy: Float, var life: Float)
+          class PD(val bi: Int) { var x = 0.5f; var y = 0.7f; var dir = 1; var ia = 6; var until = 0L; var tg = -1; var say = ""; var sayT = 0L; var walking = false; var lastFx = 0L }
+
+          class GameView(c: Context) : View(c) {
+              private val p = Paint(); private val tp = Paint(Paint.ANTI_ALIAS_FLAG)
+              private val rnd = java.util.Random()
+              var breed = 0; var name = "Perrita"; var birth = System.currentTimeMillis(); var last = System.currentTimeMillis()
+              val st = floatArrayOf(80f, 80f, 80f, 80f); val outfit = IntArray(7) { -1 }
+              private var px = 0.5f; private var dir = 1; private var mode = "idle"; private var modeEnd = 0L; private var target = 0.5f
+              private var aM = -1; private var aFx = 0; private var aStart = 0L; private var bath = false; private var sleeping = false
+              private val pts = ArrayList<Pt>(); private var lastT = SystemClock.uptimeMillis(); private var lastSp = 0L
+              var park = false; val inPark = BooleanArray(7) { true }; private val dogs = ArrayList<PD>()
+              private val aff = Array(7) { FloatArray(7) }
+              var toast: (String) -> Unit = {}
+
+              fun days() = (System.currentTimeMillis() - birth) / 86400000f
+              fun stage(): String { val d = days(); return if (d < 3) "Bebé" else if (d < 10) "Cachorra" else if (d < 14) "Joven" else "Adulta" }
+              private fun bigF() = D.breeds[breed].big * (if (days() >= 10) 1f else 0.35f)
+              private fun up(i: Int, v: Float) { st[i] = min(100f, max(5f, st[i] + v)) }
+
+              fun grow() { birth -= 86400000L }
+              fun newPet(i: Int) { breed = i; if (park) setPark(true) }
+              fun randomOutfit() { for (s in 0..6) outfit[s] = if (rnd.nextInt(3) == 0) -1 else rnd.nextInt(D.nShapes[s]) * 7 + rnd.nextInt(7) }
+
+              fun feed(a: Int, b: Int) {
+                  up(0, 18f + (a * 7 + b * 3) % 24); up(1, ((a * 5 + b) % 12).toFloat()); if (a % 5 == 3) up(3, -4f)
+                  val fav = (breed * 3 + a) % 5 == 0; if (fav) up(1, 10f)
+                  toast("${D.fBase[a]} ${D.fPrep[b]}" + (if (fav) " ¡Su favorita! 😍" else " 😋"))
+                  Snd.eat(); sleeping = false; aM = (a + b) % 22; aFx = 10 + (a + b) % 3; aStart = SystemClock.uptimeMillis()
+              }
+
+              fun act(cat: Int, a: Int, b: Int) {
+                  val id = a * 7 + b * 3 + cat * 5; sleeping = false; bath = false
+                  aM = id % 22; aFx = (id / 3 + cat * 3) % 20; aStart = SystemClock.uptimeMillis()
+                  when (cat) {
+                      0 -> { up(1, 8f); Snd.happy(); aFx = 0 }
+                      1 -> { up(1, 10f); up(2, -8f); up(0, -5f); Snd.bark(bigF()) }
+                      2 -> { up(1, 6f); up(2, -6f); if (days() < 10) Snd.yip() else Snd.bark(bigF()) }
+                      3 -> { bath = true; up(3, 25f); up(1, 2f); Snd.splash(); aFx = 6 }
+                      4 -> { sleeping = true; aM = -1; Snd.whine() }
+                      else -> { up(1, 12f); up(2, -10f); up(3, -8f); Snd.happy() }
+                  }
+                  toast(D.cats[cat].a[a] + (if (D.cats[cat].b.size > 1) " · " + D.cats[cat].b[b] else ""))
+              }
+
+              fun setPark(on: Boolean) {
+                  park = on; dogs.clear(); if (!on) return
+                  for (i in 0..6) if (inPark[i] || i == breed) { val d = PD(i); d.x = 0.1f + 0.8f * rnd.nextFloat(); d.y = 0.62f + 0.25f * rnd.nextFloat(); d.until = 0L; dogs.add(d) }
+              }
+
+              private fun decide(d: PD, now: Long) {
+                  val o2 = dogs.filter { it !== d }; if (o2.isEmpty()) return
+                  val tg = o2[rnd.nextInt(o2.size)]; val P = D.pers[d.bi]; val o = D.pers[tg.bi]; val a = aff[d.bi][tg.bi]
+                  val w = listOf(P.soc * P.ene * (1 + a), P.ene * (1 - P.ter * 0.5f) * (0.4f + P.dom), P.soc * 0.7f + 0.2f,
+                      P.ter * P.soc * (1 + a) * (if (o.ter > 0.4f) 1f else 0.3f), P.dom * P.bra * (if (P.dom > o.dom) 1.2f else 0.3f),
+                      (1 - P.bra) * (0.3f + o.dom) * (1 - a * 0.5f), (1 - P.soc) * 1.2f + 0.15f).map { max(0.01f, it) }
+                  var r = rnd.nextFloat() * w.sum(); var k = w.size - 1
+                  for (i in w.indices) { r -= w[i]; if (r <= 0) { k = i; break } }
+                  d.ia = k; d.tg = tg.bi; d.until = now + 4000 + rnd.nextInt(3000); d.say = D.intE[k]; d.sayT = now + 2500
+              }
+              private fun react(t: PD, ia: Int, from: PD, now: Long) { t.ia = ia; t.tg = from.bi; t.until = now + 3500; t.say = D.intE[ia]; t.sayT = now + 2200 }
+              private fun reach(d: PD, t: PD, now: Long) {
+                  d.lastFx = now; val P = D.pers[d.bi]; val o = D.pers[t.bi]; var dA = 0f
+                  when (d.ia) {
+                      0 -> if (o.soc > 0.4f) { react(t, 0, d, now); dA = 0.15f } else { react(t, 6, d, now); dA = -0.05f }
+                      1 -> if (o.ene > 0.6f) { react(t, 1, d, now); dA = 0.05f } else { react(t, 5, d, now); dA = -0.1f }
+                      2 -> { react(t, if (o.soc > 0.6f) 2 else 6, d, now); dA = 0.03f }
+                      3 -> if (o.ter > 0.4f) { react(t, 3, d, now); dA = 0.25f } else { react(t, 6, d, now); dA = -0.05f }
+                      4 -> if (o.bra > 0.6f) { react(t, 4, d, now); dA = -0.2f } else { react(t, 5, d, now); dA = -0.1f }
+                  }
+                  aff[d.bi][t.bi] = max(-1f, min(1f, aff[d.bi][t.bi] + dA)); aff[t.bi][d.bi] = max(-1f, min(1f, aff[t.bi][d.bi] + dA * 0.7f))
+                  if (d.bi == breed || t.bi == breed) { if (d.ia == 4) Snd.bark(D.breeds[d.bi].big) else if (d.ia == 0 || d.ia == 3) Snd.yip() }
+              }
+
+              private fun parkTick(now: Long, dt: Float) {
+                  for (d in dogs) {
+                      val P = D.pers[d.bi]; if (now > d.until) decide(d, now)
+                      val tg = dogs.firstOrNull { it.bi == d.tg }; var vx = 0f; var vy = 0f; val sp = 0.05f + 0.1f * P.ene
+                      if (d.ia in 0..4 && tg != null) {
+                          val dx = tg.x - d.x; val dy = tg.y - d.y; val dist = max(0.001f, hypot(dx, dy)); val want = if (d.ia == 3 || d.ia == 2) 0.07f else 0.1f
+                          if (dist > want) { val k = if (d.ia == 1) 1.6f else 1f; vx = dx / dist * sp * k; vy = dy / dist * sp * k * 0.6f } else if (now - d.lastFx > 1800) reach(d, tg, now)
+                      } else if (d.ia == 5 && tg != null) {
+                          val dx = d.x - tg.x; val dy = d.y - tg.y; val dist = max(0.01f, hypot(dx, dy)); vx = dx / dist * sp * 1.7f; vy = dy / dist * sp
+                      } else vx = d.dir * sp * 0.3f
+                      d.x = max(0.08f, min(0.92f, d.x + vx * dt)); d.y = max(0.6f, min(0.9f, d.y + vy * dt))
+                      if (abs(vx) > 0.002f) d.dir = if (vx > 0) 1 else -1
+                      if (d.x <= 0.08f || d.x >= 0.92f) d.dir = -d.dir
+                      d.walking = abs(vx) + abs(vy) > 0.004f
+                  }
+              }
+
+              private fun tick(now: Long, W: Float, H: Float) {
+                  val dt = min(0.1f, (now - lastT) / 1000f); lastT = now
+                  st[0] = max(10f, st[0] - 0.25f / 60 * dt); st[1] = max(10f, st[1] - 0.2f / 60 * dt); st[2] = max(10f, st[2] - 0.15f / 60 * dt); st[3] = max(10f, st[3] - 0.1f / 60 * dt)
+                  if (park) { parkTick(now, dt); return }
+                  if (sleeping) { up(2, 2f * dt); if (st[2] >= 99f) sleeping = false; if (now - lastSp > 1000) { lastSp = now; pts.add(Pt("💤", px * W + 30, H * 0.45f, -H * 0.05f, 1f)) } }
+                  if (aM >= 0) { if (now - aStart > 2400) { aM = -1; bath = false } else if (now - lastSp > 130) { lastSp = now; pts.add(Pt(D.fx[aFx], px * W + (rnd.nextFloat() - 0.5f) * W * 0.25f, H * (0.5f + 0.15f * rnd.nextFloat()), -H * 0.25f, 1f)) } }
+                  else if (!sleeping) {
+                      if (now > modeEnd) { val r = rnd.nextInt(10)
+                          if (r < 4) { mode = "walk"; target = 0.2f + 0.6f * rnd.nextFloat(); modeEnd = now + 6000 }
+                          else if (r < 7) { mode = "idle"; modeEnd = now + 3000 + rnd.nextInt(3000) }
+                          else if (r < 9) { mode = "wag"; modeEnd = now + 2000 }
+                          else { mode = "idle"; modeEnd = now + 2500; if (days() < 10) Snd.yip() else Snd.bark(bigF()) } }
+                      if (mode == "walk") { val dx = target - px; if (abs(dx) < 0.01f) { mode = "idle"; modeEnd = now + 2000 } else { dir = if (dx > 0) 1 else -1; px += dir * 0.12f * dt } }
+                  }
+                  pts.forEach { it.y += it.vy * dt; it.life -= dt * 0.8f }; pts.removeAll { it.life <= 0 }
+              }
+
+              private fun dog(c: Canvas, key: String, nm: String, cx: Float, gy: Float, s: Float, dr: Int, m: FloatArray, wear: Boolean) {
+                  val bm = Atlas.get(key, nm) ?: Atlas.get(key, "sit") ?: return
+                  val w = bm.width * s; val h = bm.height * s; val x0 = -w / 2; val y0 = -h
+                  c.save(); c.translate(cx + m[0] * w, gy + m[1] * h); c.rotate(m[2]); c.scale(dr * m[3], m[4])
+                  p.isFilterBitmap = false
+                  if (wear) D.wear(c, p, outfit, nm != "sit", x0, y0, w, h, 0)
+                  c.drawBitmap(bm, null, RectF(x0, y0, x0 + w, 0f), p)
+                  if (wear) D.wear(c, p, outfit, nm != "sit", x0, y0, w, h, 1)
+                  c.restore()
+              }
+              private fun txt(c: Canvas, s: String, x: Float, y: Float, sz: Float, al: Paint.Align, col: Int = Color.BLACK) { tp.textSize = sz; tp.textAlign = al; tp.color = col; c.drawText(s, x, y, tp) }
+
+              override fun onDraw(c: Canvas) {
+                  val now = SystemClock.uptimeMillis(); val W = width.toFloat(); val H = height.toFloat(); tick(now, W, H)
+                  p.style = Paint.Style.FILL
+                  p.color = if (sleeping) 0xFF1B2440.toInt() else 0xFFBDE7F5.toInt(); c.drawRect(0f, 0f, W, H * 0.55f, p)
+                  p.color = if (sleeping) 0xFF2E5B2E.toInt() else 0xFF7CC242.toInt(); c.drawRect(0f, H * 0.55f, W, H, p)
+                  p.color = 0xFF8B5A2B.toInt(); c.drawRect(W * 0.82f, H * 0.25f, W * 0.85f, H * 0.55f, p); p.color = 0xFF3E9E3E.toInt(); c.drawCircle(W * 0.835f, H * 0.24f, W * 0.09f, p)
+                  val d = days(); val adult = d >= 10; val sc = if (!adult) 0.45f + 0.55f * (d / 10f) else 0.8f + 0.2f * min(1f, (d - 10f) / 4f)
+                  val key = D.breeds[breed].id + (if (adult) "_a" else "_p")
+                  if (park) {
+                      for (g in dogs.sortedBy { it.y }) {
+                          val mine = g.bi == breed; val k = D.breeds[g.bi].id + (if (mine && !adult) "_p" else "_a"); val z = H * 0.0042f * (0.7f + 0.5f * g.y) * (if (mine) sc else 1f)
+                          val nm = if (g.walking) "w" + ((now / 150) % Atlas.walks(k)).toInt() else "sit"
+                          val m = floatArrayOf(0f, if (g.walking) -abs(sin(now / 100f)) * 0.03f else 0f, 0f, 1f, 1f)
+                          dog(c, k, nm, g.x * W, g.y * H, z, if (nm == "sit") 1 else g.dir, m, mine)
+                          val top = g.y * H - (Atlas.get(k, "sit")?.height ?: 60) * z - H * 0.01f
+                          if (now < g.sayT) txt(c, g.say, g.x * W, top, H * 0.045f, Paint.Align.CENTER)
+                          txt(c, (if (mine) "⭐ " + name else D.breeds[g.bi].name), g.x * W, g.y * H + H * 0.025f, H * 0.018f, Paint.Align.CENTER, Color.WHITE)
+                      }
+                      txt(c, "Parque · toca un perrito para ver su personalidad", W / 2, H * 0.05f, H * 0.02f, Paint.Align.CENTER)
+                  } else {
+                      val side = aM < 0 && !sleeping && (mode == "walk" || mode == "wag")
+                      val nm = if (side && mode == "walk") "w" + ((now / 150) % Atlas.walks(key)).toInt() else if (side) "pb" else "sit"
+                      val m = if (aM >= 0) D.motion(aM, min(1f, (now - aStart) / 2400f)) else if (sleeping) floatArrayOf(0f, 0f, 0f, 1f, 0.93f + 0.02f * sin(now / 400f))
+                          else floatArrayOf(0f, if (mode == "walk") -abs(sin(now / 100f)) * 0.03f else 0f, 0f, 1f, 1f)
+                      val s = H * 0.0045f * sc; val gy = H * 0.74f
+                      dog(c, key, nm, px * W, gy, s, if (nm == "sit") 1 else dir, m, true)
+                      if (bath) { p.color = 0x884FC3F7.toInt(); c.drawRoundRect(px * W - W * 0.3f, gy - H * 0.08f, px * W + W * 0.3f, gy + H * 0.03f, 30f, 30f, p) }
+                      if (sleeping) { p.color = 0x55000022; c.drawRect(0f, 0f, W, H, p) }
+                      for (q in pts) txt(c, q.e, q.x, q.y, H * 0.05f, Paint.Align.CENTER, Color.argb((255 * max(0f, q.life)).toInt(), 0, 0, 0))
+                      txt(c, "$name · ${D.breeds[breed].name} · ${stage()} (día ${days().toInt()})", W * 0.04f, H * 0.04f, H * 0.024f, Paint.Align.LEFT)
+                      val lab = listOf("🍖", "😊", "⚡", "🫧"); val cols = intArrayOf(0xFFEF6C00.toInt(), 0xFFE91E63.toInt(), 0xFFFDD835.toInt(), 0xFF29B6F6.toInt())
+                      for (i in 0..3) { val y = H * (0.07f + 0.04f * i); txt(c, lab[i], W * 0.04f, y + H * 0.018f, H * 0.024f, Paint.Align.LEFT)
+                          p.color = 0x55000000; c.drawRect(W * 0.12f, y, W * 0.42f, y + H * 0.02f, p); p.color = cols[i]; c.drawRect(W * 0.12f, y, W * (0.12f + 0.3f * st[i] / 100f), y + H * 0.02f, p) }
+                  }
+                  postInvalidateOnAnimation()
+              }
+
+              override fun onTouchEvent(e: MotionEvent): Boolean {
+                  if (e.action != MotionEvent.ACTION_UP) return true
+                  if (park) {
+                      val g = dogs.minByOrNull { hypot(it.x - e.x / width, it.y - e.y / height) } ?: return true
+                      val P = D.pers[g.bi]; val t = dogs.firstOrNull { it.bi == g.tg }
+                      toast("${D.breeds[g.bi].name}: ${P.t}. Ahora ${D.intN[g.ia]}" + (if (t != null && g.ia < 6) " a ${D.breeds[t.bi].name}" else ""))
+                      if (g.bi == breed) Snd.happy() else Snd.yip()
+                  } else if (sleeping) { sleeping = false; Snd.whine() } else act(0, rnd.nextInt(12), rnd.nextInt(4))
+                  return true
+              }
+
+              fun load(sp: SharedPreferences) {
+                  breed = sp.getInt("breed", 0); name = sp.getString("name", "Perrita") ?: "Perrita"; birth = sp.getLong("birth", System.currentTimeMillis()); last = sp.getLong("last", System.currentTimeMillis())
+                  for (i in 0..3) st[i] = sp.getFloat("st$i", 80f); for (i in 0..6) { outfit[i] = sp.getInt("o$i", -1); inPark[i] = sp.getBoolean("p$i", true) }
+                  val mins = min(600f, (System.currentTimeMillis() - last) / 60000f)
+                  st[0] = max(10f, st[0] - 0.25f * mins); st[1] = max(10f, st[1] - 0.2f * mins); st[2] = max(10f, st[2] - 0.15f * mins); st[3] = max(10f, st[3] - 0.1f * mins)
+              }
+              fun save(sp: SharedPreferences) {
+                  val ed = sp.edit().putInt("breed", breed).putString("name", name).putLong("birth", birth).putLong("last", System.currentTimeMillis())
+                  for (i in 0..3) ed.putFloat("st$i", st[i]); for (i in 0..6) { ed.putInt("o$i", outfit[i]); ed.putBoolean("p$i", inPark[i]) }
+                  ed.apply()
+              }
+          }
+          EOF
+          mkdir -p $(dirname app/src/main/java/com/example/perrita/MainActivity.kt)
+          cat > app/src/main/java/com/example/perrita/MainActivity.kt <<'EOF'
+          package com.example.perrita
+          import android.content.SharedPreferences
+          import android.os.Bundle
+          import android.widget.*
+          import androidx.appcompat.app.AlertDialog
+          import androidx.appcompat.app.AppCompatActivity
+          class MainActivity : AppCompatActivity() {
+              lateinit var g: GameView
+              lateinit var sp: SharedPreferences
+              private fun pick(t: String, items: List<String>, cb: (Int) -> Unit) { AlertDialog.Builder(this).setTitle(t).setItems(items.toTypedArray()) { _, i -> cb(i) }.show() }
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s)
+                  Atlas.load(this); sp = getSharedPreferences("g", 0); g = GameView(this); g.load(sp)
+                  g.toast = { Toast.makeText(this, it, Toast.LENGTH_SHORT).show() }
+                  val bar = LinearLayout(this)
+                  fun btn(t: String, f: () -> Unit) { bar.addView(Button(this).apply { text = t; isAllCaps = false; setOnClickListener { f() } }) }
+                  btn("🍖 Comer") { pick("Comida (${D.fBase.size * D.fPrep.size} combinaciones)", D.fBase) { a -> pick("Preparación", D.fPrep) { b -> g.feed(a, b) } } }
+                  D.cats.forEachIndexed { i, c -> btn(c.title) { g.setPark(false); pick(c.title, c.a) { a -> if (c.b.size <= 1) g.act(i, a, 0) else pick(c.tb, c.b) { b -> g.act(i, a, b) } } } }
+                  btn("👕 Ropa") { wardrobe() }
+                  btn("🐕 Parque") { g.setPark(!g.park) }
+                  btn("☰ Más") { menu() }
+                  setContentView(LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      addView(g, LinearLayout.LayoutParams(-1, 0, 1f))
+                      addView(HorizontalScrollView(this@MainActivity).apply { addView(bar) })
+                  })
+                  if (!sp.contains("breed")) chooseBreed(true)
+              }
+              private fun wardrobe() {
+                  pick("Ropa · ${D.total} prendas", listOf("🎲 Outfit aleatorio", "🧹 Quitar todo") + D.slots) { i ->
+                      if (i == 0) g.randomOutfit() else if (i == 1) g.outfit.fill(-1) else {
+                          val sl = i - 2; val names = listOf("(Quitar)") + (0 until D.nShapes[sl]).map { D.shapeName(sl, it) }
+                          pick(D.slots[sl], names) { j -> if (j == 0) g.outfit[sl] = -1 else pick("Color", D.colors.map { it.first }) { c -> g.outfit[sl] = (j - 1) * 7 + c } } } }
+              }
+              private fun chooseBreed(first: Boolean) {
+                  pick(if (first) "¡Elige tu mascota!" else "Cambiar raza", D.breeds.map { it.name + " · " + D.pers[D.breeds.indexOf(it)].t }) { i -> g.newPet(i); if (first) askName() }
+              }
+              private fun askName() {
+                  val e = EditText(this).apply { setText(g.name) }
+                  AlertDialog.Builder(this).setTitle("¿Cómo se llama?").setView(e).setPositiveButton("Listo") { _, _ -> g.name = e.text.toString().ifBlank { "Perrita" } }.show()
+              }
+              private fun menu() {
+                  pick("Más", listOf("🐕 Cambiar raza (mantiene edad y ropa)", "✏️ Cambiar nombre", "👥 Elegir quién va al parque", "⏩ Crecer 1 día (prueba)")) { i ->
+                      when (i) { 0 -> chooseBreed(false); 1 -> askName(); 3 -> g.grow()
+                          2 -> AlertDialog.Builder(this).setTitle("Al parque van:").setMultiChoiceItems(D.breeds.map { it.name }.toTypedArray(), g.inPark) { _, w, ch -> g.inPark[w] = ch }
+                              .setPositiveButton("Listo") { _, _ -> if (g.park) g.setPark(true) }.show() } }
+              }
+              override fun onPause() { g.save(sp); super.onPause() }
+          }
+          EOF
+          mkdir -p $(dirname app/src/main/java/com/example/perrita/Snd.kt)
+          cat > app/src/main/java/com/example/perrita/Snd.kt <<'EOF'
+          package com.example.perrita
+          import android.media.AudioFormat
+          import android.media.AudioManager
+          import android.media.AudioTrack
+          object Snd {
+              private val rnd = java.util.Random()
+              fun play(f0: Float, f1: Float, dur: Float, noise: Float = 0.3f, vib: Float = 0f, vol: Float = 0.8f) {
+                  Thread {
+                      val sr = 22050; val n = (sr * dur).toInt(); val b = ShortArray(n); var ph = 0.0
+                      for (i in 0 until n) {
+                          val t = i / n.toDouble()
+                          val f = f0 + (f1 - f0) * t + vib * Math.sin(t * 40.0) * 30.0
+                          ph += 2 * Math.PI * f / sr
+                          val env = Math.pow(1.0 - t, 1.4) * Math.min(1.0, t * 30.0)
+                          val s = (Math.sin(ph) + 0.5 * Math.sin(2 * ph) + 0.25 * Math.sin(3 * ph) + noise * (rnd.nextDouble() - 0.5)) * env
+                          b[i] = (s * 8000 * vol).toInt().toShort()
+                      }
+                      try {
+                          val at = AudioTrack(AudioManager.STREAM_MUSIC, sr, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT, n * 2, AudioTrack.MODE_STATIC)
+                          at.write(b, 0, n); at.play(); Thread.sleep((dur * 1000).toLong() + 100); at.release()
+                      } catch (e: Exception) {}
+                  }.start()
+              }
+              fun bark(big: Float) = play(900f - 500f * big, 450f - 250f * big, 0.12f + 0.08f * big, 0.5f - 0.2f * big)
+              fun yip() = play(1100f, 1500f, 0.1f, 0.15f)
+              fun whine() = play(900f, 500f, 0.5f, 0.05f, 1f)
+              fun eat() { repeat(4) { i -> Thread { Thread.sleep(i * 130L); play(300f, 200f, 0.05f, 1.5f, 0f, 0.5f) }.start() } }
+              fun splash() = play(500f, 300f, 0.25f, 3f, 0f, 0.4f)
+              fun happy() = play(1000f, 1700f, 0.18f, 0.1f, 1f)
+          }
+          EOF
+          mkdir -p $(dirname build.gradle.kts)
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+          mkdir -p $(dirname gradle.properties)
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+          mkdir -p $(dirname settings.gradle.kts)
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "Perrita"
+          include(":app")
+          EOF
+          mkdir -p $(dirname app/src/main/assets/caniche_a.png)
+          base64 -d > app/src/main/assets/caniche_a.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAKsAAABQCAMAAABRY3XxAAADAFBMVEUAAAD6+f76+P35+P75+P35
+          +Pz4+Pz29fnz6Ozh1NnUxMm3p6uRgoZLRUUKCwoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          EOF
+          mkdir -p $(dirname app/src/main/assets/caniche_p.png)
+          base64 -d > app/src/main/assets/caniche_p.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAJIAAABACAMAAADGU96YAAADAFBMVEUAAAD56+j75+H65+L65+H6
+          5+D45+L65uHz3triysfZvbvGrq2ljI5lV1cREA8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          eUTGLZeHAAAAAElFTkSuQmCC
+          EOF
+          mkdir -p $(dirname app/src/main/assets/collie_a.png)
+          base64 -d > app/src/main/assets/collie_a.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAQIAAABQCAMAAADFoIsqAAADAFBMVEUAAAD78+v06uLXyMG/raaX
+          bl5xVEiAQSh3OyVhLyBHJR0hGBQGBQMCAQAHAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          6H9XXc3ZIZA71AAAAABJRU5ErkJggg==
+          EOF
+          mkdir -p $(dirname app/src/main/assets/collie_p.png)
+          base64 -d > app/src/main/assets/collie_p.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAANYAAABACAMAAABRAnlCAAADAFBMVEUAAAD37ePw5NnPvbSumY9/
+          Z1xwQit3PSRvOSNVMyZFJRwfGBUMCQcEAwIBAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          EOF
+          mkdir -p $(dirname app/src/main/assets/dalmata_a.png)
+          base64 -d > app/src/main/assets/dalmata_a.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAP8AAABQCAMAAADhnFPDAAADAFBMVEUAAAD58er48en27eXh2NHJ
+          vrixpJ+GfXpkXFpAOjovLC8cGxsGBwUBAgECAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          vy/9HyAZvKhedD5LAAAAAElFTkSuQmCC
+          EOF
+          mkdir -p $(dirname app/src/main/assets/dalmata_p.png)
+          base64 -d > app/src/main/assets/dalmata_p.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAM8AAABACAMAAACKudNgAAADAFBMVEUAAAD37eT27ePv5NvYzMTC
+          ta6pm5V+dHBhWFREPz4yLi8cGxsICAcBAgECAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          EOF
+          mkdir -p $(dirname app/src/main/assets/doberman_a.png)
+          base64 -d > app/src/main/assets/doberman_a.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAJ8AAABQCAMAAAAwe1ezAAADAFBMVEUAAAClakN9WURUT1BNTlJM
+          TlJfSD1ERUhDNjA5KSInJygZFhQNDAoEBgQBAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          xlOotgAAAABJRU5ErkJggg==
+          EOF
+          mkdir -p $(dirname app/src/main/assets/doberman_p.png)
+          base64 -d > app/src/main/assets/doberman_p.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAK0AAABACAMAAABfqwctAAADAFBMVEUAAACVZEN0VUFVR0JGRUlT
+          QjxEQ0hAP0I6LysmJScUEhEICQcCAwEDAAEAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          EOF
+          mkdir -p $(dirname app/src/main/assets/husky_a.png)
+          base64 -d > app/src/main/assets/husky_a.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAPAAAABQCAMAAAAQlwhOAAADAFBMVEUAAAD18uzy8e3m4drLw729
+          rqielpF7cWxvY11gWFREPTweHRwGBwUBAgEDAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          88GwVCicVwwAAAAASUVORK5CYII=
+          EOF
+          mkdir -p $(dirname app/src/main/assets/husky_p.png)
+          base64 -d > app/src/main/assets/husky_p.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAMIAAABACAMAAAB/R1jQAAADAFBMVEUAAADz7+fy7eXf19C9rqej
+          kYtzaWJsY11fV1JFPjwsKScKCggCAwIEAAEAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          7323vHYZ/A9CgGrk/v18SwAAAABJRU5ErkJggg==
+          EOF
+          mkdir -p $(dirname app/src/main/assets/negra_a.png)
+          base64 -d > app/src/main/assets/negra_a.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAPoAAABQCAMAAAAHtZiHAAADAFBMVEUAAADDu8BUTVU5OUIxNDww
+          MTsuMDoqLDQfICkWGB0KCw0DBAQBAgEDAAEAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          EOF
+          mkdir -p $(dirname app/src/main/assets/negra_p.png)
+          base64 -d > app/src/main/assets/negra_p.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAANAAAABACAMAAABcHAkFAAADAFBMVEUAAACdmJ5ERU81N0AuMTou
+          MDosLjglJi4dHykXGB4NDhEGBwgBAgICAAEAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          glGfll/tAAAAAElFTkSuQmCC
+          EOF
+          mkdir -p $(dirname app/src/main/assets/samoyedo_a.png)
+          base64 -d > app/src/main/assets/samoyedo_a.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAMYAAABQCAMAAAB1evoxAAADAFBMVEUAAADx8fHv7u7u7vDu7u7l
+          4+HW0c/LxMKupqWHgH9STk0eHRwDBQMBAgEAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          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
+          gg==
+          EOF
+          mkdir -p $(dirname app/src/main/assets/samoyedo_p.png)
+          base64 -d > app/src/main/assets/samoyedo_p.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAKgAAABACAMAAAC5gsxpAAADAFBMVEUAAADx8PDv7u7u7vDu7u7q
+          6ejc2tjTzMrJwsGxqqmKfXs9ODYSExAGBwUCAwIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+          AAAAAAAAAAAAAACEuXHKAAAAAXRSTlMAQObYZgAACGtJREFUeNrNmuu266YORiPMHcF+/7c9nyRw
+          sJPVPc6P1Zp2tIm9MNO6C/J6XQd37q/76L3z61GDe00pV2Ozgc8t4yI/CZVrCgf5WHuNc6Q6WnTH
+          4VPh54izBCDlSKkkf8wRS6aQ8SGUL0bxn3AWiPOgVGv27uQ8nKdYa6LHCJVrBB2FWmsJxz5CxrUg
+          pOEJpF3xqIAz+guoj7hYSe/2J4ACz8VPzkkaCeMZoDBRcNZ8fAwx3BphpPkJ7tSKBCMIVNHoaqYQ
+          aYoxtyd4PUR6coa4/CnEeJIi6j8kPC0DjSmdoCkv0vYQ0FdrXDMAfW2tnqAFXxS4cHuE5k2owle5
+          AnmCQuVdvjwjhl5jaeuNxwnKrfemou2PA2Xu/QRFhdcM9DkSbWqi0DY0n1ZNAoNtxRLpY0y0lRAU
+          qRRwwovEjWIpig8jfRDoljzF283h10j8HNDDEhLhnyq2yW3LUU8C3eq7VPvobUv8Lj8IdGbOUhwd
+          ubJ4EVLSKqGe04uUmTlRKaNdAmgKqPDKzKUPik91ilTyJsZg+a9lU/+Q0ukm0oDe00Zv0TSfnpSZ
+          Xmd5nyFJGRbsVaD1QRKV3GSkqKAqrLNq9nweJ1rRkmNEx0nwp1IAqgJF6V+eBQqJFkH1Ep3EkYps
+          nERcLP9ZAu1fNpMg0CSkKUWNUeB0Kdulf1f3LHSsIwf6IB0ITyFmQcvZtp6yMOYUQijjX+REGmdO
+          ksqp1uD4AxTmGdAxJVW2DogXHRTRL4OOMfqFM6waA+6SfP8AtcbzRDVM3c/JvwjKqr6xc9azkiN4
+          +G3tVS6rUM8x3y3WX+QEVVw+wNC3a1X2OpEoSbqMW7IZ5Xh385Mynh3+8WvbJFxEFKevdiKXBBT1
+          mt7hcRPo2Iq6JdS98Pst3XOSpP2ORzHk1BJR7r47Ae39Z1ATatw3IH8NVCwuvh/ec87i8Yc0wF7t
+          jl8/qP647utYGv0tb+J4BX2NzjnBOJlag0Q7KvhxA1VPC+G+7agX3Pf4dB5J/J/h6D2ti/R2UFzJ
+          syfS/7XO40tbf2iyf285Sg4lLVK/gHKL33Tz17yzT1M1x34BTWS9m8Wbm9evPXFY51uo5OBWwUDb
+          ZxrGa9gj+YdE+O3Uh0U/E0FBFatr1JfBNU3E3sXkaq8mo8rmSsn2HI/di7x8ISv7l0jX6qwlti5J
+          vn8RWxDd8SV/6zSkvzqD8x+5kDOJj3MMXp2h5ql6cXiMEPTpNegDWoy21aChafYkGqVMoKnkuvhM
+          USytqYEe4W4X0mjrG1JbF85phGnQhd9AfU707ndrnl06MUojdqp6tliL2IRyzkSapH6C+i3t53ne
+          hJvDFnT+MJ3BHPD80OMR+Co20VmspGZmcqDDe3UZ5EuZFisuRV4BKe9+IZmbdH8hgjRYoz5B5TQh
+          zg38pDk+zvLE3i7KCU6TvHGEnF03G4XH4juLbHm+hXFBXUkfGe2CCBgV2bBAAf+h2ADqLN31fgWl
+          SZ5bcPjLaaEK+icpjOk+ZqtGrDaJ1txVCyLd+zJmroAbuDOKyLkenCtYcdFzgf4OV3mCejDNac28
+          B/KisE4D2V0ionMqUyTR0x+HlCcLtKwtfCuftYRKs4MuEzRhxYoQDO+MM4wc6gNdrM9XnkLSqONq
+          E0MbsEPKXCV248aahnkrLDHdT2LkAirh2qeND3GV/hoKmqbu9XhE6mc5DJkN9AzLPSeYWFznOnpo
+          SqgEZUX2HpTTt7dQCLGxTOOghucnaYSw+kqbdHw5NoJcz1JoyJwGQfkNNMRatdCvbYJGLQEl3XMp
+          bjuBUqNHGT69C3ZvHURM80BVQgjrtELvWSpuZ9ME1B9bhN+SYkpvUDmqrV06ejSbc59Mzmll1JlC
+          Asps8pacOO12jyVhv9NmYS6FoyoOV/XvHC+DrrSvnxxBDP3MRXozfhjALtEEz4qySRKEbIoUEhUb
+          re0UqNw30Nuj0ls/ENt7mxI03vsQZ/67v588fbyT5ix8nLzjrNZI/uzMF8MQWjU/X1ti6OhFPCdo
+          s7uzerxaPZY8u4iNhpSm9m/uQnoz/7mBBolblOa74FPefiPAilAgUhlz11lA0YmWqXqf2ik4TndT
+          8uEEbdcgI5P6luEvsxAsxweoiKtNpWNBUPR3M69xaIpUDmcXqG6VRDpN1lLoF9A3TKIPaf8EivzT
+          t3pJfNI3zVH6lyRyglpD38smiZdGWmwTZwO1PbNympSpPhLNWPfPMK5s9+BgNEOkONsblNW0XZGj
+          OG6sLy+hA5yUNtKuO3dcdefmK6gElxVKWFvYFM3qadPuJ6h/O4PVWmuag+Q28wto6GwHsU9rljDf
+          m5Qq41JvS8Xd6ntb7A6KW/MoFDnGIVyqKUiO3A2ezcKd7LKpiPK5TS1WEQqjxpFpoeX9tzSsP1jR
+          SmkZkOG1G6hdzNHHt0Tn/ugEzVLoN7Mmn6XTlgIXWQYvuJX+GkShYMTyDGY+Fd9g2QjDyKGjS0BF
+          Jt2nITC1F9eVNxZoL1jtDjpqLHHZaKxsXc1po6jNNCJ2BGosogSST+TzviJqWMgRRo/GhuhsChq0
+          sKa1Oe0iUcm9IppVg41Z/4XPvkJ3bk/VrwUmaNW7Q+DkkQaHOvToZV+xSfXCKreudrCWab7oNJVY
+          Fll/girpeu4CTf3LPpWoswRpk3fQAItItrZKUeU6lzwIn3hbkGBqRsBFT9VXfa+n04v03rDx4URd
+          S/cSVdv8DcFPm50DlR6CQj5BMxInrvRtw6Vbl6zZhvrec2vxyUouIlNSe41Gun8xp2WKlxYbRb8G
+          gdnBo5Zyx99acNEx/t1OyfTKZob7L9/YXzplllBlYmMJZyh1En+blm/d4G1zgCGcv4F+bCjI1zF+
+          btHvC2rXa1sM8n38vKP8F4jrpf8BwwpxWDCSBzwAAAAASUVORK5CYII=
+          EOF
+      - run: cd proyecto && gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mascota-apk
+          path: proyecto/app/build/outputs/apk/debug/app-debug.apk
